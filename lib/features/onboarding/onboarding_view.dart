@@ -18,6 +18,12 @@ class _OnboardingViewState extends State<OnboardingView> {
     "assets/Jade 4.png",
   ];
 
+  final List<String> _descriptions = [
+    "Aplikasi ini dibuat untuk memenuhi tugas mata kuliah Pengembangan Perangkat Lunak Berbasis Mobile.",
+    "Dibuat dengan sepenuh hati oleh Rifky Hermawan dengan NIM akhir 060.",
+    "Selamat mencoba!",
+  ];
+
   void _nextPage() {
     if (_pageIndex < _imageAssets.length - 1) {
       _pageController.nextPage(
@@ -79,15 +85,16 @@ class _OnboardingViewState extends State<OnboardingView> {
                   return Column(
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [
-                      const Text(
-                        "Halaman Onboarding",
-                        style: TextStyle(fontSize: 18),
-                      ),
-                      const SizedBox(height: 24),
                       Image.asset(
                         _imageAssets[index],
                         height: 200,
                         fit: BoxFit.contain,
+                      ),
+                      const SizedBox(height: 24),
+                      Text(
+                        _descriptions[index],
+                        textAlign: TextAlign.center,
+                        style: const TextStyle(fontSize: 16),
                       ),
                     ],
                   );

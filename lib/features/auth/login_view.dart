@@ -106,7 +106,7 @@ class _LoginViewState extends State<LoginView> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text("Login Gatekeeper")),
+      appBar: AppBar(title: const Text("Login Page")),
       body: Padding(
         padding: const EdgeInsets.all(16.0),
         child: Column(

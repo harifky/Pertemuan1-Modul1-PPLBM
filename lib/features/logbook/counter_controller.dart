@@ -13,8 +13,8 @@ class CounterActivity {
 class CounterController {
   CounterController({required String username}) : _username = username;
 
-  static const String _keyLastCounter = 'last_counter';
-  static const String _keyHistory = 'counter_history';
+  String get _keyLastCounter => 'last_counter_$_username';
+  String get _keyHistory => 'counter_history_$_username';
 
   final String _username;
   int _count = 0;
@@ -54,7 +54,7 @@ class CounterController {
   }
 
   Future<void> newStep(int step) async {
-    if (step > 0 && step <= 100) {
+    if (step > 0 && step <= 10) {
       _langkah = step;
       await _addAktivitas(CounterAction.changeStep, step);
     }

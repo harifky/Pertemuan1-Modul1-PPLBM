@@ -4,6 +4,7 @@ class LoginController {
     "admin": "123",
     "user": "123",
     "guest": "123",
+    "budi": "123",
   };
 
   // Fungsi pengecekan (Logic-Only)
