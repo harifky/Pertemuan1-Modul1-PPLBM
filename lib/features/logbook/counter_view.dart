@@ -88,9 +88,9 @@ class _CounterViewState extends State<CounterView> {
 
   Future<void> _handleReset() async {
     if (_controller.value == 0) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text("Angka sudah 0")),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text("Angka sudah 0")));
       return;
     }
 
@@ -107,10 +107,7 @@ class _CounterViewState extends State<CounterView> {
             ),
             TextButton(
               onPressed: () => Navigator.pop(context, true),
-              child: const Text(
-                "Reset",
-                style: TextStyle(color: Colors.red),
-              ),
+              child: const Text("Reset", style: TextStyle(color: Colors.red)),
             ),
           ],
         );
@@ -126,16 +123,16 @@ class _CounterViewState extends State<CounterView> {
       return;
     }
     setState(() {});
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text("Angka berhasil direset")),
-    );
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(const SnackBar(content: Text("Angka berhasil direset")));
   }
 
   Future<void> _handleDecrement() async {
     if (_controller.value == 0) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text("Angka sudah 0")),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text("Angka sudah 0")));
       return;
     }
 
@@ -175,10 +172,7 @@ class _CounterViewState extends State<CounterView> {
         title: Text("Logbook: ${widget.username}"),
         backgroundColor: Theme.of(context).colorScheme.inversePrimary,
         actions: [
-          IconButton(
-            icon: const Icon(Icons.refresh),
-            onPressed: _handleReset,
-          ),
+          IconButton(icon: const Icon(Icons.refresh), onPressed: _handleReset),
           IconButton(
             icon: const Icon(Icons.logout),
             onPressed: _showLogoutDialog,
