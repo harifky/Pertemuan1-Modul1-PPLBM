@@ -18,31 +18,43 @@ class LogController {
     loadFromDisk();
   }
 
-  void addLog(String title, String desc) {
+  void addLog(
+    String title,
+    String desc, {
+    LogCategory category = LogCategory.pribadi,
+  }) {
     final newLog = LogModel(
       title: title,
       description: desc,
       date: DateTime.now().toString(),
+      category: category,
     );
 
     print('📝 [STEP 1] LogModel Object dibuat:');
     print('   Title: ${newLog.title}');
     print('   Desc: ${newLog.description}');
     print('   Date: ${newLog.date}');
+    print('   Category: ${newLog.category.displayName}');
 
     logsNotifier.value = [...logsNotifier.value, newLog];
     saveToDisk();
   }
 
-  void updateLog(int index, String title, String desc) {
+  void updateLog(
+    int index,
+    String title,
+    String desc, {
+    LogCategory category = LogCategory.pribadi,
+  }) {
     final updatedLog = LogModel(
       title: title,
       description: desc,
       date: DateTime.now().toString(),
+      category: category,
     );
 
     print('\n✏️  [UPDATE] Mengubah log di index $index:');
-    print('   Baru: $title | $desc');
+    print('   Baru: $title | $desc | ${category.displayName}');
 
     final currentLogs = List<LogModel>.from(logsNotifier.value);
     currentLogs[index] = updatedLog;
