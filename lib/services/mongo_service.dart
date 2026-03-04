@@ -3,6 +3,15 @@ import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:logbook_app_060/features/models/log_model.dart';
 import 'package:logbook_app_060/helpers/log_helper.dart';
 
+class MongoConnectionException implements Exception {
+  final String message;
+
+  const MongoConnectionException(this.message);
+
+  @override
+  String toString() => message;
+}
+
 /// MongoDB Service with Singleton pattern
 /// Handles all CRUD operations with integrated logging
 class MongoService {
@@ -14,6 +23,22 @@ class MongoService {
 
   factory MongoService() => _instance;
   MongoService._internal();
+
+  bool _isConnectivityError(Object error) {
+    final msg = error.toString().toLowerCase();
+    return msg.contains('socketexception') ||
+        msg.contains('failed host lookup') ||
+        msg.contains('connection refused') ||
+        msg.contains('network is unreachable') ||
+        msg.contains('timed out') ||
+        msg.contains('connection timeout');
+  }
+
+  MongoConnectionException _offlineException() {
+    return const MongoConnectionException(
+      "Offline Mode Warning: Tidak ada koneksi internet. Menampilkan data lokal terakhir.",
+    );
+  }
 
   /// Ensures collection is connected before operations
   Future<DbCollection> _getSafeCollection() async {
@@ -55,6 +80,11 @@ class MongoService {
         source: _source,
         level: 1,
       );
+
+      if (_isConnectivityError(e)) {
+        throw _offlineException();
+      }
+
       rethrow;
     }
   }
@@ -85,7 +115,12 @@ class MongoService {
         source: _source,
         level: 1,
       );
-      return [];
+
+      if (e is MongoConnectionException || _isConnectivityError(e)) {
+        throw _offlineException();
+      }
+
+      rethrow;
     }
   }
 
@@ -116,6 +151,11 @@ class MongoService {
         source: _source,
         level: 1,
       );
+
+      if (e is MongoConnectionException || _isConnectivityError(e)) {
+        throw _offlineException();
+      }
+
       rethrow;
     }
   }
@@ -148,6 +188,11 @@ class MongoService {
         source: _source,
         level: 1,
       );
+
+      if (e is MongoConnectionException || _isConnectivityError(e)) {
+        throw _offlineException();
+      }
+
       rethrow;
     }
   }
@@ -176,6 +221,11 @@ class MongoService {
         source: _source,
         level: 1,
       );
+
+      if (e is MongoConnectionException || _isConnectivityError(e)) {
+        throw _offlineException();
+      }
+
       rethrow;
     }
   }

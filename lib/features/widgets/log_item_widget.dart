@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:intl/intl.dart';
 import 'package:logbook_app_060/features/models/log_model.dart';
 
 /// Helper function to get color based on category
@@ -23,6 +24,35 @@ Color _getCategoryBadgeColor(LogCategory category) {
     case LogCategory.urgent:
       return Colors.red[700]!;
   }
+}
+
+String _formatLogDate(String rawDate) {
+  final parsedDate = DateTime.tryParse(rawDate);
+  if (parsedDate == null) {
+    return rawDate;
+  }
+
+  final localDate = parsedDate.toLocal();
+  final now = DateTime.now();
+  final difference = now.difference(localDate);
+
+  if (difference.inMinutes < 1) {
+    return "Baru saja";
+  }
+
+  if (difference.inMinutes < 60) {
+    return "${difference.inMinutes} menit yang lalu";
+  }
+
+  if (difference.inHours < 24) {
+    return "${difference.inHours} jam yang lalu";
+  }
+
+  if (difference.inDays < 7) {
+    return "${difference.inDays} hari yang lalu";
+  }
+
+  return DateFormat('d MMM y', 'id_ID').format(localDate);
 }
 
 /// Widget untuk menampilkan satu item log dalam bentuk Card
@@ -95,7 +125,7 @@ class LogItemWidget extends StatelessWidget {
             ),
             const SizedBox(height: 6),
             Text(
-              log.date,
+              _formatLogDate(log.date),
               style: TextStyle(fontSize: 11, color: Colors.grey[600]),
             ),
           ],

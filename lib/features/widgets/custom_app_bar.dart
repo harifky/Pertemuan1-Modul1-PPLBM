@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 /// Bisa dipakai di LogView, CounterView, dll
 class CustomAppBar extends StatelessWidget implements PreferredSizeWidget {
   final String title;
+  final Widget? titleWidget;
   final List<Widget>? actions;
   final bool centerTitle;
   final VoidCallback? onLeadingPressed;
@@ -12,6 +13,7 @@ class CustomAppBar extends StatelessWidget implements PreferredSizeWidget {
   const CustomAppBar({
     super.key,
     required this.title,
+    this.titleWidget,
     this.actions,
     this.centerTitle = true,
     this.onLeadingPressed,
@@ -21,7 +23,7 @@ class CustomAppBar extends StatelessWidget implements PreferredSizeWidget {
   @override
   Widget build(BuildContext context) {
     return AppBar(
-      title: Text(title),
+      title: titleWidget ?? Text(title),
       centerTitle: centerTitle,
       backgroundColor: Theme.of(context).colorScheme.inversePrimary,
       elevation: 4,

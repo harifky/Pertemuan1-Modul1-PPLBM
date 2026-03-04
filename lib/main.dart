@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
+import 'package:intl/date_symbol_data_local.dart';
 import 'features/onboarding/onboarding_view.dart';
 import 'services/mongo_service.dart';
 import 'helpers/log_helper.dart';
@@ -10,6 +11,7 @@ void main() async {
   try {
     // Initialize logging and database
     await LogHelper.initializeLogging();
+    await initializeDateFormatting('id_ID');
     await dotenv.load(fileName: ".env");
 
     await LogHelper.writeLog(

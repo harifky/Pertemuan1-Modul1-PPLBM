@@ -37,6 +37,7 @@ class _LogViewState extends State<LogView> {
   late final ValueNotifier<String> _searchNotifier;
   late final ValueNotifier<LogCategory> _selectedCategoryNotifier;
   late final ValueNotifier<int> _refreshTrigger;
+  late final ValueNotifier<String?> _connectionWarningNotifier;
 
   @override
   void initState() {
@@ -45,6 +46,7 @@ class _LogViewState extends State<LogView> {
     _searchNotifier = ValueNotifier<String>('');
     _selectedCategoryNotifier = ValueNotifier<LogCategory>(LogCategory.pribadi);
     _refreshTrigger = ValueNotifier<int>(0);
+    _connectionWarningNotifier = ValueNotifier<String?>(null);
 
     _searchController.addListener(() {
       _searchNotifier.value = _searchController.text;
@@ -59,7 +61,84 @@ class _LogViewState extends State<LogView> {
     _searchNotifier.dispose();
     _selectedCategoryNotifier.dispose();
     _refreshTrigger.dispose();
+    _connectionWarningNotifier.dispose();
     super.dispose();
+  }
+
+  Future<List<LogModel>> _loadLogsWithFallback({
+    bool showFeedback = false,
+  }) async {
+    try {
+      final cloudLogs = await MongoService().getLogs();
+      _connectionWarningNotifier.value = null;
+
+      if (showFeedback && mounted) {
+        CustomSnackbar.success(context, "Data berhasil diperbarui dari cloud");
+      }
+
+      return cloudLogs;
+    } on MongoConnectionException catch (e) {
+      await _controller.loadFromDisk();
+      _connectionWarningNotifier.value = e.message;
+
+      if (showFeedback && mounted) {
+        CustomSnackbar.warning(context, e.message);
+      }
+
+      return _controller.logsNotifier.value;
+    } catch (e) {
+      await _controller.loadFromDisk();
+      _connectionWarningNotifier.value =
+          "Offline Mode Warning: Sinkronisasi cloud gagal. Menampilkan data lokal.";
+
+      if (showFeedback && mounted) {
+        CustomSnackbar.warning(
+          context,
+          "Sinkronisasi cloud gagal. Menampilkan data lokal.",
+        );
+      }
+
+      await LogHelper.writeLog(
+        "⚠️  Cloud fetch failed, fallback to local cache: $e",
+        source: "log_view.dart",
+        level: 2,
+      );
+
+      return _controller.logsNotifier.value;
+    }
+  }
+
+  Future<void> _handlePullToRefresh() async {
+    await _loadLogsWithFallback(showFeedback: true);
+    _refreshTrigger.value++;
+  }
+
+  Widget _buildConnectionWarningBanner(String message) {
+    return Container(
+      margin: const EdgeInsets.fromLTRB(12, 8, 12, 4),
+      padding: const EdgeInsets.all(10),
+      decoration: BoxDecoration(
+        color: Colors.orange[100],
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: Colors.orange.shade300),
+      ),
+      child: Row(
+        children: [
+          Icon(Icons.wifi_off, size: 18, color: Colors.orange[800]),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              message,
+              style: TextStyle(
+                color: Colors.orange[900],
+                fontSize: 12,
+                fontWeight: FontWeight.w500,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
   }
 
   /// Filters logs by search query
@@ -543,6 +622,44 @@ class _LogViewState extends State<LogView> {
     return Scaffold(
       appBar: CustomAppBar(
         title: "Logbook: ${toTitleCase(widget.username)}",
+        titleWidget: ValueListenableBuilder<String?>(
+          valueListenable: _connectionWarningNotifier,
+          builder: (context, warningMessage, _) {
+            final isOffline = warningMessage != null;
+            return Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Flexible(
+                  child: Text(
+                    "Logbook: ${toTitleCase(widget.username)}",
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+                if (isOffline) ...[
+                  const SizedBox(width: 8),
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 8,
+                      vertical: 3,
+                    ),
+                    decoration: BoxDecoration(
+                      color: Colors.orange[700],
+                      borderRadius: BorderRadius.circular(999),
+                    ),
+                    child: const Text(
+                      "Data lokal",
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontSize: 11,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ),
+                ],
+              ],
+            );
+          },
+        ),
         centerTitle: true,
         actions: [
           IconButton(
@@ -562,7 +679,7 @@ class _LogViewState extends State<LogView> {
         builder: (context, _, _) {
           // FutureBuilder with cloud integration and loading states
           return FutureBuilder<List<LogModel>>(
-            future: MongoService().getLogs(),
+            future: _loadLogsWithFallback(),
             builder: (context, snapshot) {
               // Handle loading state
               if (snapshot.connectionState == ConnectionState.waiting) {
@@ -630,10 +747,28 @@ class _LogViewState extends State<LogView> {
               // Handle empty data
               List<LogModel> logs = snapshot.data ?? [];
               if (logs.isEmpty) {
-                return EmptyStateWidget(
-                  title: "Data Kosong",
-                  subtitle: _welcomeMessage(),
-                  icon: Icons.note_outlined,
+                return RefreshIndicator(
+                  onRefresh: _handlePullToRefresh,
+                  child: ValueListenableBuilder<String?>(
+                    valueListenable: _connectionWarningNotifier,
+                    builder: (context, warningMessage, _) {
+                      return ListView(
+                        physics: const AlwaysScrollableScrollPhysics(),
+                        children: [
+                          if (warningMessage != null)
+                            _buildConnectionWarningBanner(warningMessage),
+                          SizedBox(
+                            height: MediaQuery.of(context).size.height * 0.7,
+                            child: EmptyStateWidget(
+                              title: "Data Kosong",
+                              subtitle: _welcomeMessage(),
+                              icon: Icons.note_outlined,
+                            ),
+                          ),
+                        ],
+                      );
+                    },
+                  ),
                 );
               }
 
@@ -643,112 +778,132 @@ class _LogViewState extends State<LogView> {
                 builder: (context, searchQuery, _) {
                   final filteredLogs = _filterLogs(logs, searchQuery);
 
-                  return CustomScrollView(
-                    slivers: [
-                      SliverToBoxAdapter(
-                        child: GreetingMessage(
-                          message: _welcomeMessage(),
-                          secondaryText: searchQuery.isEmpty
-                              ? "Anda memiliki ${logs.length} catatan"
-                              : "Ditemukan ${filteredLogs.length} dari ${logs.length} catatan",
-                        ),
-                      ),
-                      // Search Bar
-                      SliverToBoxAdapter(
-                        child: Padding(
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 12,
-                            vertical: 8,
-                          ),
-                          child: TextField(
-                            controller: _searchController,
-                            decoration: InputDecoration(
-                              hintText: "Cari catatan berdasarkan judul...",
-                              prefixIcon: const Icon(Icons.search),
-                              suffixIcon: _searchController.text.isNotEmpty
-                                  ? IconButton(
-                                      icon: const Icon(Icons.clear),
-                                      onPressed: () {
-                                        _searchController.clear();
-                                      },
-                                    )
-                                  : null,
-                              border: OutlineInputBorder(
-                                borderRadius: BorderRadius.circular(10),
+                  return RefreshIndicator(
+                    onRefresh: _handlePullToRefresh,
+                    child: CustomScrollView(
+                      physics: const AlwaysScrollableScrollPhysics(),
+                      slivers: [
+                        ValueListenableBuilder<String?>(
+                          valueListenable: _connectionWarningNotifier,
+                          builder: (context, warningMessage, _) {
+                            if (warningMessage == null) {
+                              return const SliverToBoxAdapter(
+                                child: SizedBox(),
+                              );
+                            }
+
+                            return SliverToBoxAdapter(
+                              child: _buildConnectionWarningBanner(
+                                warningMessage,
                               ),
-                              filled: true,
-                              fillColor: Colors.grey[100],
+                            );
+                          },
+                        ),
+                        SliverToBoxAdapter(
+                          child: GreetingMessage(
+                            message: _welcomeMessage(),
+                            secondaryText: searchQuery.isEmpty
+                                ? "Anda memiliki ${logs.length} catatan"
+                                : "Ditemukan ${filteredLogs.length} dari ${logs.length} catatan",
+                          ),
+                        ),
+                        // Search Bar
+                        SliverToBoxAdapter(
+                          child: Padding(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 12,
+                              vertical: 8,
+                            ),
+                            child: TextField(
+                              controller: _searchController,
+                              decoration: InputDecoration(
+                                hintText: "Cari catatan berdasarkan judul...",
+                                prefixIcon: const Icon(Icons.search),
+                                suffixIcon: _searchController.text.isNotEmpty
+                                    ? IconButton(
+                                        icon: const Icon(Icons.clear),
+                                        onPressed: () {
+                                          _searchController.clear();
+                                        },
+                                      )
+                                    : null,
+                                border: OutlineInputBorder(
+                                  borderRadius: BorderRadius.circular(10),
+                                ),
+                                filled: true,
+                                fillColor: Colors.grey[100],
+                              ),
                             ),
                           ),
                         ),
-                      ),
-                      // Empty search result
-                      if (filteredLogs.isEmpty && searchQuery.isNotEmpty)
-                        SliverToBoxAdapter(
-                          child: EmptyStateWidget(
-                            title: "Tidak ada hasil",
-                            subtitle:
-                                'Catatan dengan judul "$searchQuery" tidak ditemukan',
-                            icon: Icons.search_off,
-                          ),
-                        )
-                      else
-                        SliverList(
-                          delegate: SliverChildBuilderDelegate((
-                            context,
-                            index,
-                          ) {
-                            final log = filteredLogs[index];
-                            final originalIndex = logs.indexOf(log);
-                            return Dismissible(
-                              key: ValueKey(
-                                '${log.title}-${log.date}-${log.category.value}',
-                              ),
-                              direction: DismissDirection.endToStart,
-                              confirmDismiss: (_) =>
-                                  _showDeleteConfirmationDialog(log.title),
-                              onDismissed: (_) async {
-                                await _handleDeleteLog(log);
-                              },
-                              background: Container(
-                                margin: const EdgeInsets.symmetric(
-                                  horizontal: 12,
-                                  vertical: 6,
+                        // Empty search result
+                        if (filteredLogs.isEmpty && searchQuery.isNotEmpty)
+                          SliverToBoxAdapter(
+                            child: EmptyStateWidget(
+                              title: "Tidak ada hasil",
+                              subtitle:
+                                  'Catatan dengan judul "$searchQuery" tidak ditemukan',
+                              icon: Icons.search_off,
+                            ),
+                          )
+                        else
+                          SliverList(
+                            delegate: SliverChildBuilderDelegate((
+                              context,
+                              index,
+                            ) {
+                              final log = filteredLogs[index];
+                              final originalIndex = logs.indexOf(log);
+                              return Dismissible(
+                                key: ValueKey(
+                                  '${log.title}-${log.date}-${log.category.value}',
                                 ),
-                                alignment: Alignment.centerRight,
-                                padding: const EdgeInsets.symmetric(
-                                  horizontal: 20,
-                                ),
-                                decoration: BoxDecoration(
-                                  color: Colors.red[400],
-                                  borderRadius: BorderRadius.circular(12),
-                                ),
-                                child: Row(
-                                  mainAxisAlignment: MainAxisAlignment.end,
-                                  children: const [
-                                    Icon(Icons.delete, color: Colors.white),
-                                    SizedBox(width: 8),
-                                    Text(
-                                      "Hapus",
-                                      style: TextStyle(
-                                        color: Colors.white,
-                                        fontWeight: FontWeight.w600,
+                                direction: DismissDirection.endToStart,
+                                confirmDismiss: (_) =>
+                                    _showDeleteConfirmationDialog(log.title),
+                                onDismissed: (_) async {
+                                  await _handleDeleteLog(log);
+                                },
+                                background: Container(
+                                  margin: const EdgeInsets.symmetric(
+                                    horizontal: 12,
+                                    vertical: 6,
+                                  ),
+                                  alignment: Alignment.centerRight,
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 20,
+                                  ),
+                                  decoration: BoxDecoration(
+                                    color: Colors.red[400],
+                                    borderRadius: BorderRadius.circular(12),
+                                  ),
+                                  child: Row(
+                                    mainAxisAlignment: MainAxisAlignment.end,
+                                    children: const [
+                                      Icon(Icons.delete, color: Colors.white),
+                                      SizedBox(width: 8),
+                                      Text(
+                                        "Hapus",
+                                        style: TextStyle(
+                                          color: Colors.white,
+                                          fontWeight: FontWeight.w600,
+                                        ),
                                       ),
-                                    ),
-                                  ],
+                                    ],
+                                  ),
                                 ),
-                              ),
-                              child: LogItemWidget(
-                                log: log,
-                                index: originalIndex,
-                                onEdit: () =>
-                                    _showEditLogDialog(originalIndex, log),
-                                onDelete: () => _handleDeleteLog(log),
-                              ),
-                            );
-                          }, childCount: filteredLogs.length),
-                        ),
-                    ],
+                                child: LogItemWidget(
+                                  log: log,
+                                  index: originalIndex,
+                                  onEdit: () =>
+                                      _showEditLogDialog(originalIndex, log),
+                                  onDelete: () => _handleDeleteLog(log),
+                                ),
+                              );
+                            }, childCount: filteredLogs.length),
+                          ),
+                      ],
+                    ),
                   );
                 },
               );
