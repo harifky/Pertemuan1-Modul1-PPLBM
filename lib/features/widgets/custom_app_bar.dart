@@ -9,6 +9,7 @@ class CustomAppBar extends StatelessWidget implements PreferredSizeWidget {
   final bool centerTitle;
   final VoidCallback? onLeadingPressed;
   final bool showLeading;
+  final double toolbarHeight;
 
   const CustomAppBar({
     super.key,
@@ -18,11 +19,13 @@ class CustomAppBar extends StatelessWidget implements PreferredSizeWidget {
     this.centerTitle = true,
     this.onLeadingPressed,
     this.showLeading = false,
+    this.toolbarHeight = kToolbarHeight,
   });
 
   @override
   Widget build(BuildContext context) {
     return AppBar(
+      toolbarHeight: toolbarHeight,
       title: titleWidget ?? Text(title),
       centerTitle: centerTitle,
       backgroundColor: Theme.of(context).colorScheme.inversePrimary,
@@ -38,7 +41,7 @@ class CustomAppBar extends StatelessWidget implements PreferredSizeWidget {
   }
 
   @override
-  Size get preferredSize => const Size.fromHeight(kToolbarHeight);
+  Size get preferredSize => Size.fromHeight(toolbarHeight);
 }
 
 /// Widget untuk membuat greeting message dengan styling konsisten

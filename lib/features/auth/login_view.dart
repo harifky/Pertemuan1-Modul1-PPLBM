@@ -47,7 +47,7 @@ class _LoginViewState extends State<LoginView> {
     });
   }
 
-  void _handleLogin() {
+  void _handleLogin() async {
     if (_isLocked) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text("Tunggu $_lockSeconds detik lagi")),
@@ -65,7 +65,7 @@ class _LoginViewState extends State<LoginView> {
       return;
     }
 
-    bool isSuccess = _controller.login(user, pass);
+    bool isSuccess = await _controller.login(user, pass);
 
     if (isSuccess) {
       _failedAttempts = 0;
@@ -87,7 +87,11 @@ class _LoginViewState extends State<LoginView> {
       }
 
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text("Login Gagal! Gunakan admin/123")),
+        const SnackBar(
+          content: Text(
+            "Login gagal. Coba: ketua_alpha/123, anggota_alpha/123, ketua_beta/123, anggota_beta/123",
+          ),
+        ),
       );
     }
   }

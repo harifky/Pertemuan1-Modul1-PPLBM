@@ -1,9 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:logbook_app_060/features/onboarding/onboarding_view.dart';
 import 'package:logbook_app_060/features/widgets/widgets.dart';
-import 'package:logbook_app_060/services/mongo_service.dart';
+import 'package:mongo_dart/mongo_dart.dart' as mongo;
+import 'package:logbook_app_060/services/user_context_service.dart';
+import 'package:logbook_app_060/services/connectivity_service.dart';
 import 'package:logbook_app_060/helpers/log_helper.dart';
 import 'log_controller.dart';
+import 'log_editor_page.dart'; // NEW: Full-page editor with Markdown support
 import '../models/log_model.dart';
 
 String toTitleCase(String text) {
@@ -29,39 +32,69 @@ class LogView extends StatefulWidget {
 
 class _LogViewState extends State<LogView> {
   late final LogController _controller;
+  late final ConnectivityService _connectivityService;
 
-  final TextEditingController _titleController = TextEditingController();
-  final TextEditingController _contentController = TextEditingController();
   final TextEditingController _searchController = TextEditingController();
 
   late final ValueNotifier<String> _searchNotifier;
-  late final ValueNotifier<LogCategory> _selectedCategoryNotifier;
   late final ValueNotifier<int> _refreshTrigger;
   late final ValueNotifier<String?> _connectionWarningNotifier;
+
+  // RBAC: Store current user context for permission checking
+  String _currentUserRole = 'Anggota';
+  String _currentUserId = 'unknown_user';
+  String _currentTeamId = 'no_team';
 
   @override
   void initState() {
     super.initState();
-    _controller = LogController(widget.username);
+    _controller = LogController();
+    _connectivityService = ConnectivityService();
     _searchNotifier = ValueNotifier<String>('');
-    _selectedCategoryNotifier = ValueNotifier<LogCategory>(LogCategory.pribadi);
     _refreshTrigger = ValueNotifier<int>(0);
     _connectionWarningNotifier = ValueNotifier<String?>(null);
 
     _searchController.addListener(() {
       _searchNotifier.value = _searchController.text;
     });
+
+    _connectivityService.startListening(
+      onReconnect: () async {
+        await _loadLogsWithFallback(showFeedback: true);
+        _refreshTrigger.value++;
+      },
+    );
+
+    // Load user context for RBAC
+    _loadUserContext();
+  }
+
+  /// Load current user role and ID for permission checking
+  Future<void> _loadUserContext() async {
+    final role = await UserContextService.getUserRole();
+    final userId = await UserContextService.getUserId();
+    final teamId = await UserContextService.getTeamId();
+
+    setState(() {
+      _currentUserRole = role;
+      _currentUserId = userId;
+      _currentTeamId = teamId;
+    });
+
+    await LogHelper.writeLog(
+      "👤 User context loaded: Role=$role, UserID=$userId, TeamID=$teamId",
+      source: "log_view.dart",
+      level: 3,
+    );
   }
 
   @override
   void dispose() {
-    _titleController.dispose();
-    _contentController.dispose();
     _searchController.dispose();
     _searchNotifier.dispose();
-    _selectedCategoryNotifier.dispose();
     _refreshTrigger.dispose();
     _connectionWarningNotifier.dispose();
+    _connectivityService.stopListening();
     super.dispose();
   }
 
@@ -69,37 +102,24 @@ class _LogViewState extends State<LogView> {
     bool showFeedback = false,
   }) async {
     try {
-      final cloudLogs = await MongoService().getLogs();
+      final teamId = await UserContextService.getTeamId();
+      await _controller.loadLogs(teamId);
       _connectionWarningNotifier.value = null;
 
       if (showFeedback && mounted) {
-        CustomSnackbar.success(context, "Data berhasil diperbarui dari cloud");
-      }
-
-      return cloudLogs;
-    } on MongoConnectionException catch (e) {
-      await _controller.loadFromDisk();
-      _connectionWarningNotifier.value = e.message;
-
-      if (showFeedback && mounted) {
-        CustomSnackbar.warning(context, e.message);
+        CustomSnackbar.success(context, "Data berhasil diperbarui");
       }
 
       return _controller.logsNotifier.value;
     } catch (e) {
-      await _controller.loadFromDisk();
-      _connectionWarningNotifier.value =
-          "Offline Mode Warning: Sinkronisasi cloud gagal. Menampilkan data lokal.";
+      _connectionWarningNotifier.value = "Offline Mode: Menggunakan data lokal";
 
       if (showFeedback && mounted) {
-        CustomSnackbar.warning(
-          context,
-          "Sinkronisasi cloud gagal. Menampilkan data lokal.",
-        );
+        CustomSnackbar.warning(context, "Mode offline: Menggunakan data lokal");
       }
 
       await LogHelper.writeLog(
-        "⚠️  Cloud fetch failed, fallback to local cache: $e",
+        "📴 Loading in offline mode: $e",
         source: "log_view.dart",
         level: 2,
       );
@@ -155,6 +175,10 @@ class _LogViewState extends State<LogView> {
         .toList();
   }
 
+  List<LogModel> _applyVisibilityFilter(List<LogModel> logs) {
+    return _controller.filterVisibleLogs(logs, _currentUserId, _currentTeamId);
+  }
+
   String _welcomeMessage() {
     final hour = DateTime.now().hour;
     String greeting;
@@ -187,7 +211,8 @@ class _LogViewState extends State<LogView> {
               child: const Text("Batal"),
             ),
             TextButton(
-              onPressed: () {
+              onPressed: () async {
+                await UserContextService.clearUserContext();
                 Navigator.pop(context);
                 Navigator.pushAndRemoveUntil(
                   context,
@@ -209,13 +234,25 @@ class _LogViewState extends State<LogView> {
   }
 
   Future<void> _handleClearAllLogs() async {
+    final ownLogs = _controller.logsNotifier.value
+        .where((log) => log.authorId == _currentUserId)
+        .toList();
+
+    if (ownLogs.isEmpty) {
+      CustomSnackbar.warning(
+        context,
+        "Tidak ada catatan milik Anda yang bisa dihapus",
+      );
+      return;
+    }
+
     final bool? shouldClear = await showDialog<bool>(
       context: context,
       builder: (BuildContext context) {
         return AlertDialog(
           title: const Text("Konfirmasi Hapus Semua"),
-          content: const Text(
-            "Hapus semua catatan? Tindakan ini tidak bisa dibatalkan.",
+          content: Text(
+            "Hapus semua catatan milik Anda (${ownLogs.length} item)? Catatan pengguna lain tidak akan terhapus.",
           ),
           actions: [
             TextButton(
@@ -238,8 +275,21 @@ class _LogViewState extends State<LogView> {
       return;
     }
 
-    while (_controller.logsNotifier.value.isNotEmpty) {
-      _controller.removeLog(0);
+    var deletedCount = 0;
+    for (final log in ownLogs) {
+      if (log.id == null) {
+        continue;
+      }
+
+      try {
+        await _controller.removeLogByObjectId(
+          mongo.ObjectId.fromHexString(log.id!),
+          log.title,
+        );
+        deletedCount++;
+      } catch (_) {
+        // Keep processing remaining owned logs even if one deletion fails.
+      }
     }
 
     if (!mounted) {
@@ -249,10 +299,17 @@ class _LogViewState extends State<LogView> {
     // Refresh FutureBuilder
     _refreshTrigger.value++;
 
-    CustomSnackbar.warning(context, "Semua catatan berhasil dihapus");
+    if (deletedCount == 0) {
+      CustomSnackbar.error(context, "Gagal menghapus catatan milik Anda");
+    } else {
+      CustomSnackbar.warning(
+        context,
+        "$deletedCount catatan milik Anda berhasil dihapus",
+      );
+    }
 
     await LogHelper.writeLog(
-      "✅ All logs cleared successfully, FutureBuilder refreshed",
+      "✅ Clear owned logs completed: deleted=$deletedCount, FutureBuilder refreshed",
       source: "log_view.dart",
       level: 3,
     );
@@ -315,10 +372,23 @@ class _LogViewState extends State<LogView> {
     return shouldDelete == true;
   }
 
-  Future<void> _handleDeleteLog(LogModel log) async {
-    final bool shouldDelete = await _showDeleteConfirmationDialog(log.title);
-    if (!shouldDelete) {
+  Future<void> _handleDeleteLog(
+    LogModel log, {
+    bool askConfirmation = true,
+  }) async {
+    if (log.authorId != _currentUserId) {
+      CustomSnackbar.error(
+        context,
+        "Owner only: Anda tidak bisa menghapus catatan ini",
+      );
       return;
+    }
+
+    if (askConfirmation) {
+      final bool shouldDelete = await _showDeleteConfirmationDialog(log.title);
+      if (!shouldDelete) {
+        return;
+      }
     }
 
     // Check if log has ObjectId from cloud
@@ -332,7 +402,10 @@ class _LogViewState extends State<LogView> {
 
     try {
       // Delete directly by ObjectId (safer for FutureBuilder pattern)
-      await _controller.removeLogByObjectId(log.id!, log.title);
+      await _controller.removeLogByObjectId(
+        mongo.ObjectId.fromHexString(log.id!),
+        log.title,
+      );
 
       // Refresh FutureBuilder
       _refreshTrigger.value++;
@@ -363,258 +436,31 @@ class _LogViewState extends State<LogView> {
     }
   }
 
-  void _showAddLogDialog() {
-    _selectedCategoryNotifier.value = LogCategory.pribadi;
-
-    showDialog(
-      context: context,
-      builder: (_) => AlertDialog(
-        title: const Text("Tambah Catatan"),
-        content: ValueListenableBuilder<LogCategory>(
-          valueListenable: _selectedCategoryNotifier,
-          builder: (context, selectedCategory, _) {
-            return Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                TextField(
-                  controller: _titleController,
-                  decoration: const InputDecoration(
-                    hintText: "Judul",
-                    border: OutlineInputBorder(),
-                  ),
-                ),
-                const SizedBox(height: 10),
-                TextField(
-                  controller: _contentController,
-                  decoration: const InputDecoration(
-                    hintText: "Deskripsi",
-                    border: OutlineInputBorder(),
-                  ),
-                  minLines: 3,
-                  maxLines: 5,
-                ),
-                const SizedBox(height: 15),
-                // Category Dropdown
-                DropdownButtonFormField<LogCategory>(
-                  value: selectedCategory,
-                  decoration: const InputDecoration(
-                    labelText: "Kategori",
-                    border: OutlineInputBorder(),
-                    prefixIcon: Icon(Icons.category),
-                  ),
-                  items: LogCategory.values.map((category) {
-                    return DropdownMenuItem(
-                      value: category,
-                      child: Row(
-                        children: [
-                          Container(
-                            width: 12,
-                            height: 12,
-                            decoration: BoxDecoration(
-                              shape: BoxShape.circle,
-                              color: category == LogCategory.pekerjaan
-                                  ? Colors.blue
-                                  : category == LogCategory.pribadi
-                                  ? Colors.green
-                                  : Colors.red,
-                            ),
-                          ),
-                          const SizedBox(width: 8),
-                          Text(category.displayName),
-                        ],
-                      ),
-                    );
-                  }).toList(),
-                  onChanged: (category) {
-                    if (category != null) {
-                      _selectedCategoryNotifier.value = category;
-                    }
-                  },
-                ),
-              ],
-            );
-          },
-        ),
-        actions: [
-          TextButton(
-            onPressed: () {
-              _titleController.clear();
-              _contentController.clear();
-              Navigator.pop(context);
-            },
-            child: const Text("Batal"),
-          ),
-          ElevatedButton(
-            onPressed: () async {
-              if (_titleController.text.isNotEmpty &&
-                  _contentController.text.isNotEmpty) {
-                try {
-                  // Use async method for Cloud integration
-                  await _controller.addLogAsync(
-                    _titleController.text,
-                    _contentController.text,
-                    category: _selectedCategoryNotifier.value,
-                  );
-
-                  // Refresh FutureBuilder
-                  _refreshTrigger.value++;
-
-                  _titleController.clear();
-                  _contentController.clear();
-
-                  if (!mounted) return;
-                  Navigator.pop(context);
-
-                  CustomSnackbar.success(
-                    context,
-                    "Catatan berhasil ditambahkan",
-                  );
-
-                  await LogHelper.writeLog(
-                    "✅ Log added successfully, FutureBuilder refreshed",
-                    source: "log_view.dart",
-                    level: 3,
-                  );
-                } catch (e) {
-                  if (!mounted) return;
-                  CustomSnackbar.error(
-                    context,
-                    "Gagal menambahkan catatan: $e",
-                  );
-
-                  await LogHelper.writeLog(
-                    "❌ Error adding log in dialog: $e",
-                    source: "log_view.dart",
-                    level: 1,
-                  );
-                }
-              }
-            },
-            child: const Text("Simpan"),
-          ),
-        ],
+  /// Navigate to full-page editor for adding new log
+  void _navigateToAddLog() {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (context) => LogEditorPage(controller: _controller),
       ),
-    );
+    ).then((_) {
+      // Refresh data after returning from editor
+      _refreshTrigger.value++;
+    });
   }
 
-  void _showEditLogDialog(int index, LogModel log) {
-    _titleController.text = log.title;
-    _contentController.text = log.description;
-    _selectedCategoryNotifier.value = log.category;
-
-    showDialog(
-      context: context,
-      builder: (_) => AlertDialog(
-        title: const Text("Edit Catatan"),
-        content: ValueListenableBuilder<LogCategory>(
-          valueListenable: _selectedCategoryNotifier,
-          builder: (context, selectedCategory, _) {
-            return Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                TextField(
-                  controller: _titleController,
-                  decoration: const InputDecoration(
-                    hintText: "Judul",
-                    border: OutlineInputBorder(),
-                  ),
-                ),
-                const SizedBox(height: 10),
-                TextField(
-                  controller: _contentController,
-                  decoration: const InputDecoration(
-                    hintText: "Deskripsi",
-                    border: OutlineInputBorder(),
-                  ),
-                  minLines: 3,
-                  maxLines: 5,
-                ),
-                const SizedBox(height: 15),
-                // Category Dropdown
-                DropdownButtonFormField<LogCategory>(
-                  value: selectedCategory,
-                  decoration: const InputDecoration(
-                    labelText: "Kategori",
-                    border: OutlineInputBorder(),
-                    prefixIcon: Icon(Icons.category),
-                  ),
-                  items: LogCategory.values.map((category) {
-                    return DropdownMenuItem(
-                      value: category,
-                      child: Row(
-                        children: [
-                          Container(
-                            width: 12,
-                            height: 12,
-                            decoration: BoxDecoration(
-                              shape: BoxShape.circle,
-                              color: category == LogCategory.pekerjaan
-                                  ? Colors.blue
-                                  : category == LogCategory.pribadi
-                                  ? Colors.green
-                                  : Colors.red,
-                            ),
-                          ),
-                          const SizedBox(width: 8),
-                          Text(category.displayName),
-                        ],
-                      ),
-                    );
-                  }).toList(),
-                  onChanged: (category) {
-                    if (category != null) {
-                      _selectedCategoryNotifier.value = category;
-                    }
-                  },
-                ),
-              ],
-            );
-          },
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text("Batal"),
-          ),
-          ElevatedButton(
-            onPressed: () async {
-              try {
-                // Use async method for Cloud integration
-                await _controller.updateLogAsync(
-                  index,
-                  _titleController.text,
-                  _contentController.text,
-                  category: _selectedCategoryNotifier.value,
-                );
-
-                // Refresh FutureBuilder
-                _refreshTrigger.value++;
-
-                if (!mounted) return;
-                Navigator.pop(context);
-                CustomSnackbar.info(context, "Catatan berhasil diperbarui");
-
-                await LogHelper.writeLog(
-                  "✅ Log updated successfully, FutureBuilder refreshed",
-                  source: "log_view.dart",
-                  level: 3,
-                );
-              } catch (e) {
-                if (!mounted) return;
-                CustomSnackbar.error(context, "Gagal memperbarui catatan: $e");
-
-                await LogHelper.writeLog(
-                  "❌ Error updating log in dialog: $e",
-                  source: "log_view.dart",
-                  level: 1,
-                );
-              }
-            },
-            child: const Text("Update"),
-          ),
-        ],
+  /// Navigate to full-page editor for editing existing log
+  void _navigateToEditLog(int index, LogModel log) {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (context) =>
+            LogEditorPage(log: log, index: index, controller: _controller),
       ),
-    );
+    ).then((_) {
+      // Refresh data after returning from editor
+      _refreshTrigger.value++;
+    });
   }
 
   @override
@@ -745,7 +591,9 @@ class _LogViewState extends State<LogView> {
               }
 
               // Handle empty data
-              List<LogModel> logs = snapshot.data ?? [];
+              final allLogs = snapshot.data ?? [];
+              final logs = _applyVisibilityFilter(allLogs);
+
               if (logs.isEmpty) {
                 return RefreshIndicator(
                   onRefresh: _handlePullToRefresh,
@@ -760,9 +608,10 @@ class _LogViewState extends State<LogView> {
                           SizedBox(
                             height: MediaQuery.of(context).size.height * 0.7,
                             child: EmptyStateWidget(
-                              title: "Data Kosong",
-                              subtitle: _welcomeMessage(),
-                              icon: Icons.note_outlined,
+                              title: "Belum ada aktivitas hari ini?",
+                              subtitle:
+                                  "Mulai catat kemajuan proyek Anda!\nTekan tombol + di bawah untuk membuat catatan pertama.",
+                              icon: Icons.rocket_launch_outlined,
                             ),
                           ),
                         ],
@@ -854,15 +703,22 @@ class _LogViewState extends State<LogView> {
                             ) {
                               final log = filteredLogs[index];
                               final originalIndex = logs.indexOf(log);
+                              final isOwner =
+                                  log.authorId == _currentUserId &&
+                                  !log.isDeleted;
                               return Dismissible(
                                 key: ValueKey(
-                                  '${log.title}-${log.date}-${log.category.value}',
+                                  '${log.title}-${log.date}-${log.id ?? "temp"}',
                                 ),
-                                direction: DismissDirection.endToStart,
-                                confirmDismiss: (_) =>
-                                    _showDeleteConfirmationDialog(log.title),
-                                onDismissed: (_) async {
-                                  await _handleDeleteLog(log);
+                                direction: isOwner
+                                    ? DismissDirection.endToStart
+                                    : DismissDirection.none,
+                                confirmDismiss: (_) async {
+                                  await _handleDeleteLog(
+                                    log,
+                                    askConfirmation: true,
+                                  );
+                                  return false;
                                 },
                                 background: Container(
                                   margin: const EdgeInsets.symmetric(
@@ -895,8 +751,10 @@ class _LogViewState extends State<LogView> {
                                 child: LogItemWidget(
                                   log: log,
                                   index: originalIndex,
+                                  currentUserRole: _currentUserRole,
+                                  currentUserId: _currentUserId,
                                   onEdit: () =>
-                                      _showEditLogDialog(originalIndex, log),
+                                      _navigateToEditLog(originalIndex, log),
                                   onDelete: () => _handleDeleteLog(log),
                                 ),
                               );
@@ -912,7 +770,7 @@ class _LogViewState extends State<LogView> {
         },
       ),
       floatingActionButton: FloatingActionButton(
-        onPressed: _showAddLogDialog,
+        onPressed: _navigateToAddLog,
         tooltip: "Tambah Catatan",
         child: const Icon(Icons.add),
       ),

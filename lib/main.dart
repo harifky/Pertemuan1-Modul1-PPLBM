@@ -1,12 +1,23 @@
 import 'package:flutter/material.dart';
+import 'dart:async';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
+import 'package:hive_flutter/hive_flutter.dart'; // Gunakan hive_flutter, bukan hive biasa
 import 'package:intl/date_symbol_data_local.dart';
 import 'features/onboarding/onboarding_view.dart';
+import 'features/models/log_model.dart';
 import 'services/mongo_service.dart';
 import 'helpers/log_helper.dart';
 
 void main() async {
+  // Wajib untuk operasi asinkron sebelum runApp
   WidgetsFlutterBinding.ensureInitialized();
+
+  // INISIALISASI HIVE
+  await Hive.initFlutter();
+  Hive.registerAdapter(LogModelAdapter()); // WAJIB: Sesuai nama di .g.dart
+  await Hive.openBox<LogModel>(
+    'offline_logs',
+  ); // Buka box sebelum Controller dipakai
 
   try {
     // Initialize logging and database
@@ -19,19 +30,6 @@ void main() async {
       source: "main.dart",
       level: 2,
     );
-
-    // Connect to MongoDB
-    final mongoService = MongoService();
-    await mongoService.connect().timeout(
-      const Duration(seconds: 15),
-      onTimeout: () => throw Exception("MongoDB connection timeout"),
-    );
-
-    await LogHelper.writeLog(
-      "✅ APP: MongoDB connected",
-      source: "main.dart",
-      level: 2,
-    );
   } catch (e) {
     await LogHelper.writeLog(
       "⚠️  APP: Initialization warning - $e",
@@ -41,6 +39,26 @@ void main() async {
   }
 
   runApp(const MyApp());
+
+  // Warm up MongoDB in background so UI startup is not blocked on mobile.
+  unawaited(
+    MongoService()
+        .connect()
+        .then((_) async {
+          await LogHelper.writeLog(
+            "✅ APP: MongoDB connected",
+            source: "main.dart",
+            level: 2,
+          );
+        })
+        .catchError((e) async {
+          await LogHelper.writeLog(
+            "⚠️  APP: Background MongoDB warm-up failed - $e",
+            source: "main.dart",
+            level: 2,
+          );
+        }),
+  );
 }
 
 class MyApp extends StatelessWidget {
@@ -48,9 +66,24 @@ class MyApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return const MaterialApp(
+    return MaterialApp(
       debugShowCheckedModeBanner: false,
-      home: OnboardingView(),
+      theme: ThemeData(
+        useMaterial3: true,
+        colorScheme: ColorScheme.fromSeed(
+          seedColor: const Color(0xFF1E88E5),
+          brightness: Brightness.light,
+        ),
+        scaffoldBackgroundColor: const Color(0xFFF7FAFC),
+        cardColor: Colors.white,
+        appBarTheme: const AppBarTheme(
+          backgroundColor: Color(0xFFEAF4FF),
+          foregroundColor: Color(0xFF17324D),
+          elevation: 0,
+          centerTitle: true,
+        ),
+      ),
+      home: const OnboardingView(),
     );
   }
 }
