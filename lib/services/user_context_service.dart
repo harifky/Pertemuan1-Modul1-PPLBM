@@ -9,15 +9,27 @@ class UserContextService {
   static const String _keyTeamId = 'current_team_id';
 
   /// Menyimpan informasi user saat login
+  // ✅ Kode diperbaiki - Tambahkan validasi input
   static Future<void> setUserContext({
     required String userId,
     required String username,
     required String role,
     String teamId = 'default_team',
   }) async {
+    // ✅ VALIDASI: Pastikan userId dan username tidak kosong
+    if (userId.trim().isEmpty) {
+      throw ArgumentError('userId tidak boleh kosong');
+    }
+    if (username.trim().isEmpty) {
+      throw ArgumentError('username tidak boleh kosong');
+    }
+
     final prefs = await SharedPreferences.getInstance();
-    await prefs.setString(_keyUserId, userId);
-    await prefs.setString(_keyUsername, username);
+    await prefs.setString(
+      _keyUserId,
+      userId.trim(),
+    ); // ✅ Simpan nilai yang sudah trim
+    await prefs.setString(_keyUsername, username.trim());
     await prefs.setString(_keyUserRole, role);
     await prefs.setString(_keyTeamId, teamId);
   }

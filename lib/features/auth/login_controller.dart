@@ -30,13 +30,17 @@ class LoginController {
   // Fungsi ini mengembalikan true jika cocok, false jika salah.
   // Juga menyimpan user context saat login berhasil
   Future<bool> login(String username, String password) async {
-    if (_users[username] == password) {
-      // Simpan user context untuk RBAC
+    // ✅ NORMALISASI INPUT: Hapus spasi di awal/akhir
+    final normalizedUsername = username.trim();
+    final normalizedPassword = password.trim();
+
+    // ✅ Gunakan variabel yang sudah dinormalisasi untuk lookup
+    if (_users[normalizedUsername] == normalizedPassword) {
       await UserContextService.setUserContext(
-        userId: username,
-        username: username,
-        role: _userRoles[username] ?? 'Anggota',
-        teamId: _userTeams[username] ?? 'default_team',
+        userId: normalizedUsername, // ✅ Simpan data bersih
+        username: normalizedUsername,
+        role: _userRoles[normalizedUsername] ?? 'Anggota',
+        teamId: _userTeams[normalizedUsername] ?? 'default_team',
       );
       return true;
     }

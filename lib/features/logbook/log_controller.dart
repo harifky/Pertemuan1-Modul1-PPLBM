@@ -280,12 +280,17 @@ class LogController {
     String category = 'Software',
   ]) async {
     try {
+      // ✅ VALIDASI: Pastikan title tidak kosong → silently reject
+      if (title.trim().isEmpty) {
+        return; // ✅ Jangan lanjutkan proses, jangan throw exception
+      }
+
       final objectId = mongo.ObjectId();
-      // Catat waktu pembuatan catatan oleh pengguna (tidak berubah saat edit)
       final createdAt = DateTime.now().toIso8601String();
+
       final newLog = LogModel(
         id: objectId.oid,
-        title: title,
+        title: title.trim(),
         description: desc,
         date: createdAt,
         authorId: authorId,
@@ -299,28 +304,12 @@ class LogController {
       await _myBox.add(newLog);
       logsNotifier.value = [...logsNotifier.value, newLog];
 
-      await LogHelper.writeLog(
-        "💾 Log '$title' saved locally (Hive)",
-        source: _source,
-        level: 3,
-      );
-
       // ACTION 2: Sync to Cloud in background
       try {
         await _remoteDataSource.insertLog(newLog);
         await _markSyncedInLocalAndNotifier(newLog.id!, true);
-
-        await LogHelper.writeLog(
-          "☁️  SUCCESS: '$title' synced to Cloud",
-          source: _source,
-          level: 2,
-        );
       } catch (mongoError) {
-        await LogHelper.writeLog(
-          "⚠️  WARNING: '$title' saved locally, will sync when online - $mongoError",
-          source: _source,
-          level: 1,
-        );
+        // Handle offline
       }
     } catch (e) {
       await LogHelper.writeLog(

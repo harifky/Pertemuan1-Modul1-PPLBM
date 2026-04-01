@@ -14,6 +14,7 @@ class CounterController {
   CounterController({required String username}) : _username = username;
 
   String get _keyLastCounter => 'last_counter_$_username';
+  String get _keyStep => 'last_step_$_username'; // ✅ Tambah key untuk step
   String get _keyHistory => 'counter_history_$_username';
 
   final String _username;
@@ -32,12 +33,14 @@ class CounterController {
   Future<void> loadState() async {
     final prefs = await SharedPreferences.getInstance();
     _count = prefs.getInt(_keyLastCounter) ?? 0;
+    _langkah = prefs.getInt(_keyStep) ?? 1; // ✅ Load step dari storage
     _logEntries = prefs.getStringList(_keyHistory) ?? [];
   }
 
   Future<void> _persistState() async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setInt(_keyLastCounter, _count);
+    await prefs.setInt(_keyStep, _langkah); // ✅ Simpan step ke storage
     await prefs.setStringList(_keyHistory, _logEntries);
   }
 
@@ -47,10 +50,12 @@ class CounterController {
   }
 
   Future<void> decrement() async {
-    if (_count > 0 && _count >= _langkah) {
+    if (_count >= _langkah) {
       _count -= _langkah;
-      await _addAktivitas(CounterAction.decrement, _langkah);
+    } else {
+      _count = 0; // ✅ Clamp ke 0 saat counter < step
     }
+    await _addAktivitas(CounterAction.decrement, _langkah);
   }
 
   Future<void> newStep(int step) async {
@@ -62,6 +67,8 @@ class CounterController {
 
   Future<void> reset() async {
     _count = 0;
+    _riwayat.clear(); // ✅ Clear riwayat
+    _logEntries.clear(); // ✅ Clear log entries
     await _addAktivitas(CounterAction.reset, 0);
   }
 
